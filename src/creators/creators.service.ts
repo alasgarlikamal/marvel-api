@@ -1,7 +1,7 @@
 import { InjectRedis } from '@liaoliaots/nestjs-redis';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { lastValueFrom } from 'rxjs';
 
@@ -17,21 +17,27 @@ export class CreatorsService {
     async getCreatorsData(){
 
         try {
-            const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/creators', {
-                params: this.configService.get('marvelApiConfig')
-            });
 
-            const creators = (await lastValueFrom(request)).data;
+            if (!await this.redis.exists('marvelcreators:all')){
 
-            await this.redis.call('FT.CREATE', 'marvelcreators', 'ON', 'JSON', 'PREFIX', '1', 'marvelcreators:', 'SCHEMA', '$.fullName', 'as', 'fullName', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
+                const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/creators', {
+                    params: this.configService.get('marvelApiConfig')
+                });
 
-            await Promise.all(creators.data.results.map(async (creator: any, index: number) => {
-                await this.redis.call("JSON.SET", `marvelcreators:${index+1}`, "$", JSON.stringify(creator))
-            }));    
-        
-            await this.redis.call("JSON.SET", "marvelcreators:all", "$", JSON.stringify(creators));
+                const creators = (await lastValueFrom(request)).data;
 
-            return creators;
+                await this.redis.call('FT.CREATE', 'marvelcreators', 'ON', 'JSON', 'PREFIX', '1', 'marvelcreators:', 'SCHEMA', '$.fullName', 'as', 'fullName', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
+
+                await Promise.all(creators.data.results.map(async (creator: any, index: number) => {
+                    await this.redis.call("JSON.SET", `marvelcreators:${index+1}`, "$", JSON.stringify(creator))
+                }));    
+            
+                await this.redis.call("JSON.SET", "marvelcreators:all", "$", JSON.stringify(creators));
+
+                return creators;
+            }
+
+            throw new ConflictException('Database already seeded!');
             
         } catch (error) {
             return error;

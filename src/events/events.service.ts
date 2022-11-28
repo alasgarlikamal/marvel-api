@@ -1,7 +1,7 @@
 import { InjectRedis } from '@liaoliaots/nestjs-redis';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { lastValueFrom } from 'rxjs';
 
@@ -17,6 +17,8 @@ export class EventsService {
     async getEventsData(){
 
         try {
+            if (!await this.redis.exists('marvelevents:all')){
+
             const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/events', {
                 params: this.configService.get('marvelApiConfig')
             });
@@ -32,6 +34,9 @@ export class EventsService {
             await this.redis.call("JSON.SET", "marvelevents:all", "$", JSON.stringify(events));
 
             return events;
+        }
+
+        throw new ConflictException('Database already seeded!');
             
         } catch (error) {
             return error;

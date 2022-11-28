@@ -1,7 +1,7 @@
 import { InjectRedis } from '@liaoliaots/nestjs-redis';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { lastValueFrom } from 'rxjs';
 
@@ -17,21 +17,26 @@ export class SeriesService {
     async getSeriesData(){
 
         try {
-            const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/series', {
-                params: this.configService.get('marvelApiConfig')
-            });
+            if (!await this.redis.exists('marvelseries:all')){
 
-            const series = (await lastValueFrom(request)).data;
+                const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/series', {
+                    params: this.configService.get('marvelApiConfig')
+                });
 
-            await this.redis.call('FT.CREATE', 'marvelseries', 'ON', 'JSON', 'PREFIX', '1', 'marvelseries:', 'SCHEMA', '$.title', 'as', 'title', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
+                const series = (await lastValueFrom(request)).data;
 
-            await Promise.all(series.data.results.map(async (serie: any, index: number) => {
-                await this.redis.call("JSON.SET", `marvelseries:${index+1}`, "$", JSON.stringify(serie))
-            }));    
-        
-            await this.redis.call("JSON.SET", "marvelseries:all", "$", JSON.stringify(series));
+                await this.redis.call('FT.CREATE', 'marvelseries', 'ON', 'JSON', 'PREFIX', '1', 'marvelseries:', 'SCHEMA', '$.title', 'as', 'title', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
 
-            return series;
+                await Promise.all(series.data.results.map(async (serie: any, index: number) => {
+                    await this.redis.call("JSON.SET", `marvelseries:${index+1}`, "$", JSON.stringify(serie))
+                }));    
+            
+                await this.redis.call("JSON.SET", "marvelseries:all", "$", JSON.stringify(series));
+
+                return series;
+            }
+
+            throw new ConflictException('Database already seeded!');
             
         } catch (error) {
             return error;

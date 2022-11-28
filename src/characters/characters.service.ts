@@ -1,5 +1,5 @@
 import { InjectRedis } from '@liaoliaots/nestjs-redis';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
@@ -17,22 +17,26 @@ export class CharactersService {
     async getCharacterData(){
 
         try {
-            const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/characters', {
-                params: this.configService.get('marvelApiConfig')
-            });
 
-            const characters = (await lastValueFrom(request)).data;
+            if (!await this.redis.exists('marvelcharacters:all')){
+                const request = this.httpService.get('https://gateway.marvel.com:443/v1/public/characters', {
+                    params: this.configService.get('marvelApiConfig')
+                });
+    
+                const characters = (await lastValueFrom(request)).data;
+    
+                await this.redis.call("JSON.SET", "marvelcharacters:all", "$", JSON.stringify(characters));
+    
+                await this.redis.call('FT.CREATE', 'marvelcharacters', 'ON', 'JSON', 'PREFIX', '1', 'marvelcharacters:', 'SCHEMA', '$.name', 'as', 'name', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
+    
+                await Promise.all(characters.data.results.map(async (character: any, index: number) => {
+                    await this.redis.call("JSON.SET", `marvelcharacters:${index+1}`, "$", JSON.stringify(character))             
+                }));
 
-            await this.redis.call('FT.CREATE', 'marvelcharacters', 'ON', 'JSON', 'PREFIX', '1', 'marvelcharacters:', 'SCHEMA', '$.name', 'as', 'name', 'TEXT', '$.id', 'as', 'id', 'NUMERIC');
-
-
-            await Promise.all(characters.data.results.map(async (character: any, index: number) => {
-                await this.redis.call("JSON.SET", `marvelcharacters:${index+1}`, "$", JSON.stringify(character))
-            }));    
-        
-            await this.redis.call("JSON.SET", "marvelcharacters:all", "$", JSON.stringify(characters));
-
-            return characters;
+                return characters;
+            }
+                
+            throw new ConflictException('Database already seeded!');
             
         } catch (error) {
             return error;
